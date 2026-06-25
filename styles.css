@@ -1,0 +1,515 @@
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  background: #1a1a1a;
+  color: #e8e8e8;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  padding: 12px 20px;
+  background: #222;
+  border-bottom: 1px solid #333;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+header h1 {
+  font-size: 15px;
+  font-weight: 500;
+  margin: 0 16px 0 0;
+}
+
+header .vehicle {
+  font-size: 13px;
+  color: #888;
+  margin-left: auto;
+}
+
+.divider {
+  width: 1px;
+  height: 20px;
+  background: #333;
+  margin: 0 4px;
+}
+
+button,
+label.btn {
+  background: #2d2d2d;
+  color: #e8e8e8;
+  border: 1px solid #444;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+button:hover,
+label.btn:hover {
+  background: #3a3a3a;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: #2d5a8c;
+  border-color: #4a7ab0;
+}
+
+button.primary:hover {
+  background: #3a6da3;
+}
+
+input[type=file] { display: none; }
+
+select {
+  background: #2d2d2d;
+  color: #e8e8e8;
+  border: 1px solid #444;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+main {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+#views-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 1px;
+  background: #333;
+}
+
+.view-panel {
+  position: relative;
+  background: #111;
+  overflow: hidden;
+}
+
+.view-panel canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+
+.view-panel canvas.dragging { cursor: grabbing; }
+
+/* When user has armed an asset for placement, cue every canvas. */
+body.placing .view-panel canvas { cursor: crosshair; }
+
+#asset-picker {
+  position: relative;
+  background: #111;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#asset-picker .picker-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 8px;
+  border-bottom: 1px solid #222;
+  z-index: 2;
+}
+
+#asset-picker .panel-label {
+  position: static;
+}
+
+#picker-search {
+  flex: 1;
+  background: #1a1a1a;
+  color: #e8e8e8;
+  border: 1px solid #2c2c2c;
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-family: inherit;
+}
+
+#picker-search:focus {
+  outline: none;
+  border-color: #4a7ab0;
+}
+
+#picker-grid {
+  flex: 1;
+  overflow-y: auto;
+  display: grid;
+  /* Fixed-size square cells — auto-fill packs as many 72px squares per row as
+     fit, no aspect-ratio guesswork. */
+  grid-template-columns: repeat(auto-fill, 72px);
+  grid-auto-rows: 72px;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  align-content: start;
+}
+
+#picker-grid .picker-cell {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 3px;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+#picker-grid .picker-cell:hover {
+  border-color: #4a7ab0;
+  background: #1f1f1f;
+}
+
+#picker-grid .picker-cell.armed {
+  border-color: #7ab8ff;
+  box-shadow: 0 0 0 1px #7ab8ff inset;
+  background: #2a3a52;
+}
+
+#picker-grid .picker-cell img {
+  position: absolute;
+  inset: 4px;
+  width: calc(100% - 8px);
+  height: calc(100% - 8px);
+  object-fit: contain;
+  /* invert so light decal art is visible on dark background */
+  filter: invert(1) brightness(0.95);
+  pointer-events: none;
+}
+
+/* Unify scrollbar styling across sidebar and asset picker. */
+#sidebar,
+#picker-grid {
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a3a #1a1a1a;
+}
+#sidebar::-webkit-scrollbar,
+#picker-grid::-webkit-scrollbar {
+  width: 8px;
+}
+#sidebar::-webkit-scrollbar-track,
+#picker-grid::-webkit-scrollbar-track {
+  background: #1a1a1a;
+}
+#sidebar::-webkit-scrollbar-thumb,
+#picker-grid::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 4px;
+}
+#sidebar::-webkit-scrollbar-thumb:hover,
+#picker-grid::-webkit-scrollbar-thumb:hover {
+  background: #4a4a4a;
+}
+
+.panel-label {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #555;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.view-panel.has-selection .panel-label {
+  color: #7ab8ff;
+}
+
+.panel-status {
+  position: absolute;
+  bottom: 4px;
+  left: 6px;
+  font-size: 10px;
+  color: #666;
+  pointer-events: none;
+}
+
+#sidebar {
+  width: 260px;
+  background: #1e1e1e;
+  border-left: 1px solid #333;
+  overflow-y: auto;
+  padding: 12px;
+  flex-shrink: 0;
+}
+
+#sidebar h2 {
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  color: #888;
+  margin: 0 0 8px;
+  letter-spacing: 0.5px;
+}
+
+.decal-row {
+  padding: 8px;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  background: #2a2a2a;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.decal-row:hover { background: #333; }
+
+.decal-row.selected {
+  background: #3a4a6a;
+  border: 1px solid #5577aa;
+  padding: 7px;
+}
+
+.swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  border: 1px solid #444;
+}
+
+.decal-info { flex: 1; min-width: 0; }
+
+.decal-key {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.decal-meta {
+  color: #777;
+  font-size: 10px;
+  margin-top: 2px;
+}
+
+#empty-state {
+  text-align: center;
+  color: #666;
+  padding: 60px 20px;
+  font-size: 14px;
+}
+
+#empty-state p { margin: 8px 0; }
+
+#toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: #2d5a8c;
+  color: #fff;
+  padding: 10px 18px;
+  border-radius: 6px;
+  font-size: 13px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+  z-index: 100;
+}
+
+#toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+#toast.error { background: #8c2d2d; }
+
+.hint {
+  color: #777;
+  font-size: 11px;
+  margin-top: 12px;
+  line-height: 1.5;
+}
+
+.pair-badge {
+  display: inline-block;
+  font-size: 10px;
+  color: #7ab8ff;
+  margin-left: 4px;
+}
+
+#props-panel {
+  background: #252525;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 10px;
+  margin-bottom: 12px;
+}
+
+#props-panel.hidden { display: none; }
+
+#props-panel h2 {
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  color: #888;
+  margin: 0 0 8px;
+  letter-spacing: 0.5px;
+}
+
+.prop-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.prop-row label {
+  color: #888;
+  font-size: 11px;
+  min-width: 32px;
+}
+
+.prop-row span {
+  color: #ccc;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prop-row input[type="number"] {
+  flex: 1;
+  min-width: 0;
+  background: #1a1a1a;
+  color: #e8e8e8;
+  border: 1px solid #444;
+  border-radius: 3px;
+  padding: 3px 5px;
+  font-size: 11px;
+  font-family: inherit;
+}
+
+.prop-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.prop-actions button {
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 11px;
+}
+
+.prop-actions button.active {
+  background: #2d5a8c;
+  border-color: #4a7ab0;
+  color: #fff;
+}
+
+.prop-color {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  grid-template-rows: auto auto;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+#prop-color {
+  grid-row: 1 / 3;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #444;
+  border-radius: 3px;
+  background: #1a1a1a;
+  cursor: pointer;
+}
+
+#prop-hex {
+  background: #1a1a1a;
+  color: #e8e8e8;
+  border: 1px solid #444;
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-family: monospace;
+}
+
+.prop-rgba {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3px;
+  align-items: center;
+}
+
+.prop-rgba label {
+  font-size: 9px;
+  color: #777;
+  text-align: center;
+}
+
+.prop-rgba input {
+  background: #1a1a1a;
+  color: #e8e8e8;
+  border: 1px solid #444;
+  border-radius: 3px;
+  padding: 2px 3px;
+  font-size: 10px;
+  font-family: inherit;
+  width: 100%;
+  min-width: 0;
+}
+
+/* Hide the spinner arrows in number inputs — they eat space inside narrow cells */
+.prop-rgba input::-webkit-outer-spin-button,
+.prop-rgba input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.prop-rgba input { -moz-appearance: textfield; }
+
+/* Marquee selection rectangle drawn during a drag in empty panel space */
+.marquee-rect {
+  position: absolute;
+  border: 1px dashed #7ab8ff;
+  background: rgba(122, 184, 255, 0.08);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.decal-row.locked .decal-key::before {
+  content: "🔒 ";
+  font-size: 10px;
+}
+
+.count-badge {
+  font-size: 11px;
+  color: #888;
+  margin-left: auto;
+  padding: 2px 8px;
+  background: #2a2a2a;
+  border-radius: 10px;
+}
+.count-badge.over { color: #ff7a7a; background: #4a1a1a; }

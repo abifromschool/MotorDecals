@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Motor Town Decal Editor</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <h1>Motor Town decal editor</h1>
+
+  <label class="btn">
+    Load file
+    <input type="file" id="file-input" accept=".json,.txt,application/json">
+  </label>
+  <button id="paste-btn">Paste from clipboard</button>
+
+  <div class="divider"></div>
+
+  <label class="btn" title="Pick the parent folder containing decal PNGs (subfolders are scanned recursively)">
+    Load decals
+    <input type="file" id="decals-input" webkitdirectory multiple>
+  </label>
+  <span id="decals-status" class="vehicle"></span>
+
+  <div class="divider"></div>
+
+  <button id="copy-btn" class="primary" disabled>Copy to clipboard</button>
+  <button id="export-btn" disabled>Download file</button>
+
+  <div class="divider"></div>
+
+  <button id="reset-views-btn" title="Auto-fit every panel to its decals">Reset views</button>
+
+  <span class="vehicle" id="vehicle-label"></span>
+  <span class="count-badge" id="count-badge" title="Layer slots used of 30 max (mirror flag is free)">0 / 30</span>
+</header>
+
+<main>
+  <div id="views-grid">
+    <div class="view-panel" data-face="left">
+      <div class="panel-label">Left</div>
+      <canvas></canvas>
+      <div class="panel-status"></div>
+    </div>
+    <div class="view-panel" data-face="front">
+      <div class="panel-label">Front</div>
+      <canvas></canvas>
+      <div class="panel-status"></div>
+    </div>
+    <div class="view-panel" data-face="right">
+      <div class="panel-label">Right</div>
+      <canvas></canvas>
+      <div class="panel-status"></div>
+    </div>
+    <div class="view-panel" data-face="back">
+      <div class="panel-label">Back</div>
+      <canvas></canvas>
+      <div class="panel-status"></div>
+    </div>
+    <div class="view-panel" data-face="top">
+      <div class="panel-label">Top</div>
+      <canvas></canvas>
+      <div class="panel-status"></div>
+    </div>
+    <div id="asset-picker">
+      <div class="picker-header">
+        <div class="panel-label">Decals</div>
+        <input type="text" id="picker-search" placeholder="Search…" autocomplete="off">
+      </div>
+      <div id="picker-grid"></div>
+    </div>
+  </div>
+  <aside id="sidebar">
+    <div id="props-panel" class="hidden">
+      <h2 id="props-heading">Selected</h2>
+      <div class="prop-color">
+        <input type="color" id="prop-color" title="Color">
+        <input type="text" id="prop-hex" maxlength="7" placeholder="#rrggbb" title="Hex color">
+        <div class="prop-rgba">
+          <label>R</label><input type="number" id="prop-r" min="0" max="255" step="1">
+          <label>G</label><input type="number" id="prop-g" min="0" max="255" step="1">
+          <label>B</label><input type="number" id="prop-b" min="0" max="255" step="1">
+          <label>A</label><input type="number" id="prop-a" min="0" max="255" step="1">
+        </div>
+      </div>
+      <div class="prop-row"><label>Key</label><span id="prop-key">—</span></div>
+      <div class="prop-row"><label>Face</label><span id="prop-face">—</span></div>
+      <div class="prop-row">
+        <label>X</label><input type="number" id="prop-x" step="1">
+        <label>Y</label><input type="number" id="prop-y" step="1">
+      </div>
+      <div class="prop-row">
+        <label>Roll</label><input type="number" id="prop-roll" step="1">
+        <label>Scale</label><input type="number" id="prop-scale" step="0.05" min="0.05">
+      </div>
+      <div class="prop-row">
+        <label>Stretch</label><input type="number" id="prop-stretch" step="0.1" min="0.05">
+        <label>Cover</label><input type="number" id="prop-coverage" step="0.05" min="0">
+      </div>
+      <div class="prop-row">
+        <label>Flags</label><input type="number" id="prop-flags" step="1" min="0" title="Raw flags bitfield (bit 1 = mirror)">
+      </div>
+      <div class="prop-actions">
+        <button id="mirror-btn" title="Mirror — auto-detects text decals and clones instead of flipping (M)">Mirror</button>
+        <button id="flip-btn" title="Toggle vertical flip — flags bits 0+4 (F)">Flip V</button>
+        <button id="lock-btn" title="Lock prevents drag/WASD/delete (L)">Lock</button>
+      </div>
+      <div class="prop-actions">
+        <button id="raise-btn" title="Move up one layer (])">Raise</button>
+        <button id="lower-btn" title="Move down one layer ([)">Lower</button>
+        <button id="duplicate-btn" title="Duplicate (Ctrl+D)">Duplicate</button>
+        <button id="delete-btn" title="Delete (Del)">Delete</button>
+      </div>
+    </div>
+    <h2>Decals</h2>
+    <div id="decal-list">
+      <div id="empty-state">
+        <p>No JSON loaded.</p>
+        <p>Use <b>Load file</b> or <b>Paste from clipboard</b>.</p>
+      </div>
+    </div>
+    <div class="hint">
+      <b>Drag</b> to move · <b>Ctrl+click</b> to multi-select · drag in empty space to marquee-select.<br>
+      <b>WASD</b> nudges · <b>Q/E</b> rotates · hold <b>Shift</b> for 10×.<br>
+      <b>M</b> mirror (auto-clones text) · <b>F</b> flip · <b>L</b> lock · <b>[ / ]</b> reorder.<br>
+      <b>Ctrl+A</b> select all · <b>Esc</b> deselect · <b>Del</b> deletes · <b>Ctrl+D</b> duplicates.<br>
+      <b>Ctrl+Z</b> undo · <b>Ctrl+Shift+Z</b> / <b>Ctrl+Y</b> redo.<br>
+      <b>Add a decal:</b> click a thumbnail, then click any face. <b>Esc</b> cancels.<br>
+      Shift-drag or middle-click to pan, scroll to zoom, double-click to fit.<br>
+      <b>Ctrl/Cmd+V</b> pastes JSON · <b>Ctrl/Cmd+C</b> copies.
+    </div>
+  </aside>
+</main>
+
+<div id="toast"></div>
+
+<script src="decals_manifest.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

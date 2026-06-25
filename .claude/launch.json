@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mtdraw",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "3000", "-d", "C:\\Users\\abi\\Desktop\\MTDraw"],
+      "port": 3000
+    }
+  ]
+}
