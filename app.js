@@ -11,6 +11,10 @@
   const lockedLayers = new WeakSet();
   let dragState = null;
   let marqueeRect = null;  // {panel, el, x0, y0} during marquee selection
+  // Last panel the mouse hovered, with the world coord under the cursor.
+  // Used by Ctrl+V to pick the paste target face and position.
+  let mouseFace = null;
+  let mouseWorld = null;
 
   const MAX_DECALS = 30;
 
@@ -173,23 +177,35 @@
   }
 
   // Build (and cache) a canvas with the decal image tinted by the given color.
+  // The cache is per-decal, LRU-bounded — rapid color-picker dragging produces
+  // hundreds of unique RGBAs per second, and uncapped this can blow Chrome's
+  // graphics memory in seconds (each ~512x512 canvas is ~1MB).
+  const TINT_CACHE_MAX = 8;
   function getTintedCanvas(cached, color) {
     const ck = `${color.r},${color.g},${color.b},${color.a}`;
-    let canvas = cached.tinted.get(ck);
-    if (canvas) return canvas;
+    const existing = cached.tinted.get(ck);
+    if (existing) {
+      // bump to end of Map iteration order — JS Maps preserve insertion order
+      cached.tinted.delete(ck);
+      cached.tinted.set(ck, existing);
+      return existing;
+    }
     const img = cached.img;
-    canvas = document.createElement('canvas');
+    const canvas = document.createElement('canvas');
     canvas.width = img.naturalWidth;
     canvas.height = img.naturalHeight;
     const c = canvas.getContext('2d');
-    // 1. paint solid color
     c.fillStyle = `rgb(${color.r},${color.g},${color.b})`;
     c.fillRect(0, 0, canvas.width, canvas.height);
-    // 2. clip to image alpha (keeps only the decal's shape)
     c.globalCompositeOperation = 'destination-in';
     c.drawImage(img, 0, 0);
     c.globalCompositeOperation = 'source-over';
     cached.tinted.set(ck, canvas);
+    // Evict oldest entries beyond the cap (FIFO via Map iteration order).
+    while (cached.tinted.size > TINT_CACHE_MAX) {
+      const oldest = cached.tinted.keys().next().value;
+      cached.tinted.delete(oldest);
+    }
     return canvas;
   }
 
@@ -228,14 +244,34 @@
   const lowerBtn = document.getElementById('lower-btn');
   const duplicateBtn = document.getElementById('duplicate-btn');
   const deleteBtn = document.getElementById('delete-btn');
+  const alignRow = document.getElementById('align-row');
+  const alignL = document.getElementById('align-l');
+  const alignCx = document.getElementById('align-cx');
+  const alignR = document.getElementById('align-r');
+  const alignT = document.getElementById('align-t');
+  const alignCy = document.getElementById('align-cy');
+  const alignB = document.getElementById('align-b');
+  const distribH = document.getElementById('distrib-h');
+  const distribV = document.getElementById('distrib-v');
   const pickerSearch = document.getElementById('picker-search');
   const pickerGrid = document.getElementById('picker-grid');
+  const pickerLabel = document.getElementById('picker-label');
 
   // ---------- asset picker / place mode ----------
   // State must be declared before any code that calls populatePicker(), which
   // touches `pickerKeys` via the let binding's TDZ.
   let armedKey = null;  // decalKey waiting to be placed
   let pickerKeys = [];  // sorted list of all asset keys for filtering
+  // Most-recently used decal keys, capped — surfaced at the top of the picker
+  // when there's no active search. Bumped on place / replace.
+  const RECENT_CAP = 8;
+  let recentKeys = [];
+  function bumpRecent(key) {
+    if (!key) return;
+    recentKeys = [key, ...recentKeys.filter(k => k !== key)].slice(0, RECENT_CAP);
+    // Refresh the picker so the row reflects the new order.
+    if (pickerGrid) renderPickerGrid(pickerSearch ? pickerSearch.value : '');
+  }
 
   decalsInput.addEventListener('change', (e) => {
     const files = Array.from(e.target.files || []);
@@ -267,20 +303,40 @@
   function renderPickerGrid(filter) {
     pickerGrid.innerHTML = '';
     const f = filter.trim().toLowerCase();
-    const matches = f ? pickerKeys.filter(k => k.includes(f)) : pickerKeys;
-    // Cap to a reasonable number per render to avoid stalls on the full 479
+    // When unfiltered, surface recent keys first (deduped from the main pool)
+    // so the user can re-use what they were just working with. With an active
+    // search we skip the recents row to keep results scope-limited.
+    let ordered;
+    let recentSet = new Set();
+    if (f) {
+      ordered = pickerKeys.filter(k => k.includes(f));
+    } else {
+      const recents = recentKeys.filter(k => assetIndex.has(k));
+      recentSet = new Set(recents);
+      ordered = [...recents, ...pickerKeys.filter(k => !recentSet.has(k))];
+    }
     const cap = 600;
-    for (const key of matches.slice(0, cap)) {
+    for (const key of ordered.slice(0, cap)) {
       const asset = assetIndex.get(key);
       const cell = document.createElement('div');
-      cell.className = 'picker-cell' + (key === armedKey ? ' armed' : '');
-      cell.title = key;
+      const classes = ['picker-cell'];
+      if (key === armedKey) classes.push('armed');
+      if (recentSet.has(key)) classes.push('recent');
+      cell.className = classes.join(' ');
+      cell.title = `${key}\nClick: place new · Alt+click: replace selected decal(s)`;
       cell.dataset.key = key;
       const img = document.createElement('img');
       img.src = asset.url;
       img.alt = key;
       cell.appendChild(img);
-      cell.addEventListener('click', () => armForPlacement(key));
+      cell.addEventListener('click', (ev) => {
+        if (ev.altKey && selectedIdxs.size) {
+          ev.preventDefault();
+          replaceSelectionKey(key);
+        } else {
+          armForPlacement(key);
+        }
+      });
       pickerGrid.appendChild(cell);
     }
   }
@@ -344,7 +400,32 @@
     selectOnly(layers.length - 1);
     cancelPlacement();
     refreshAll();
+    bumpRecent(layer.decalKey);
     toast(`Placed ${layer.decalKey}`);
+  }
+
+  // Swap the decalKey of every selected (unlocked) decal — keeps every other
+  // field (position, rotation, color, scale, flags) intact. Triggered by
+  // Shift+click on any picker thumbnail when a selection exists.
+  function replaceSelectionKey(newKey) {
+    if (!selectedIdxs.size) return;
+    pushHistory();
+    let changed = 0;
+    const targets = [...selectedIdxs];
+    for (const i of targets) {
+      if (isLocked(i)) continue;
+      if (layers[i].decalKey === newKey) continue;
+      layers[i].decalKey = newKey;
+      changed++;
+    }
+    if (!changed) {
+      history.pop();  // nothing actually changed; don't pollute undo
+      toast('No decals changed (all locked or already that key)', true);
+      return;
+    }
+    refreshAll();
+    bumpRecent(newKey);
+    toast(`Replaced ${changed} decal${changed === 1 ? '' : 's'} → ${newKey}`);
   }
 
   // ---------- toast ----------
@@ -651,6 +732,17 @@
     for (const f of FACES) drawPanel(panels[f]);
   }
 
+  // rAF-batched draw — many input events in the same frame coalesce to a
+  // single repaint. Use this in hot edit paths (color slider, drag, WASD).
+  let drawRafId = 0;
+  function scheduleDraw() {
+    if (drawRafId) return;
+    drawRafId = requestAnimationFrame(() => {
+      drawRafId = 0;
+      drawAll();
+    });
+  }
+
   // ---------- hit testing ----------
   // Hit-test in reverse of draw order so the topmost (highest idx, real) wins.
   function decalAtInPanel(panel, sx, sy) {
@@ -771,7 +863,9 @@
     try {
       const text = await navigator.clipboard.readText();
       if (!text) { toast('Clipboard is empty', true); return; }
-      loadJsonText(text, 'clipboard');
+      const env = tryParseDecalEnvelope(text);
+      if (env) pasteDecalsFromEnvelope(env);
+      else loadJsonText(text, 'clipboard');
     } catch (err) {
       toast('Clipboard read blocked — paste manually with Ctrl+V', true);
     }
@@ -783,10 +877,16 @@
     const t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
     const text = e.clipboardData && e.clipboardData.getData('text');
-    if (text) {
+    if (!text) return;
+    // Decal envelope takes priority — if the clipboard holds the magic key,
+    // paste as decals; otherwise treat as a full file paste.
+    const env = tryParseDecalEnvelope(text);
+    if (env) {
+      pasteDecalsFromEnvelope(env);
+    } else {
       loadJsonText(text, 'paste');
-      e.preventDefault();
     }
+    e.preventDefault();
   });
 
   // ---------- export ----------
@@ -811,6 +911,103 @@
 
   copyBtn.addEventListener('click', copyToClipboard);
 
+  // ---------- decal clipboard ----------
+  // Selected decals serialize into a tagged envelope so the paste handler can
+  // distinguish them from a full file paste.
+  function buildDecalEnvelope() {
+    const ordered = [...selectedIdxs].sort((a, b) => a - b);
+    if (!ordered.length) return null;
+    const sourceLayer = layers[ordered[0]];
+    const sourceFace = classifyView(sourceLayer);
+    return {
+      __mtdecals: 1,
+      version: 1,
+      sourceFace,
+      decals: ordered.map(i => JSON.parse(JSON.stringify(layers[i]))),
+    };
+  }
+
+  async function copyDecalsToClipboard() {
+    const env = buildDecalEnvelope();
+    if (!env) return;
+    const json = JSON.stringify(env);
+    const n = env.decals.length;
+    try {
+      await navigator.clipboard.writeText(json);
+      toast(`Copied ${n} decal${n === 1 ? '' : 's'}`);
+    } catch (err) {
+      const ta = document.createElement('textarea');
+      ta.value = json;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); toast(`Copied ${n} decal${n === 1 ? '' : 's'}`); }
+      catch (e2) { toast('Could not copy', true); }
+      document.body.removeChild(ta);
+    }
+  }
+
+  function pasteDecalsFromEnvelope(env) {
+    if (!data) { toast('Load a JSON file first', true); return; }
+    if (!env || !Array.isArray(env.decals) || !env.decals.length) {
+      toast('Empty decal clipboard', true); return;
+    }
+    // Pick target face: panel under the cursor wins; fall back to the source
+    // face stored in the envelope (so pasting without hovering keeps things
+    // on the same face they came from).
+    const targetFace = (mouseFace && panels[mouseFace]) ? mouseFace : env.sourceFace;
+    const targetRotation = defaultRotationForFace(targetFace || 'left');
+
+    // Centroid of source positions → re-anchor under the cursor if available.
+    let cx = 0, cy = 0;
+    for (const d of env.decals) { cx += d.position.x; cy += d.position.y; }
+    cx /= env.decals.length; cy /= env.decals.length;
+    const dx = (mouseWorld ? mouseWorld.x : cx + 10) - cx;
+    const dy = (mouseWorld ? mouseWorld.y : cy)      - cy;
+
+    // Push history before any mutation so a single Ctrl+Z reverts the paste.
+    pushHistory();
+    let added = 0;
+    const newIdxs = [];
+    for (const src of env.decals) {
+      if (layers.length >= MAX_DECALS) break;
+      const copy = JSON.parse(JSON.stringify(src));
+      copy.position.x = src.position.x + dx;
+      copy.position.y = src.position.y + dy;
+      copy.rotation = copy.rotation || {};
+      copy.rotation.yaw = targetRotation.yaw;
+      copy.rotation.pitch = targetRotation.pitch;
+      // Preserve roll — that's in-plane and meaningful across faces.
+      if (copy.rotation.roll == null) copy.rotation.roll = 0;
+      // Pasted copies are standalone — strip the mirror flag from the source.
+      setMirrored(copy, false);
+      layers.push(copy);
+      newIdxs.push(layers.length - 1);
+      added++;
+    }
+    if (!added) {
+      history.pop();  // nothing happened; don't pollute the undo stack
+      toast(`Decal cap reached (${MAX_DECALS}). Delete one first.`, true);
+      return;
+    }
+    selectedIdxs.clear();
+    for (const i of newIdxs) selectedIdxs.add(i);
+    selectedIdx = newIdxs[newIdxs.length - 1];
+    refreshAll();
+    const skipped = env.decals.length - added;
+    toast(`Pasted ${added} decal${added === 1 ? '' : 's'} on ${targetFace}${skipped ? ` (${skipped} skipped — cap)` : ''}`);
+  }
+
+  // Try to parse text as a decal envelope. Returns the envelope or null.
+  function tryParseDecalEnvelope(text) {
+    try {
+      const obj = JSON.parse(text);
+      if (obj && obj.__mtdecals === 1 && Array.isArray(obj.decals)) return obj;
+    } catch (_) { /* not JSON */ }
+    return null;
+  }
+
   resetViewsBtn.addEventListener('click', () => {
     fitAllPanels();
     drawAll();
@@ -824,7 +1021,10 @@
     if (sel && sel.toString().length > 0) return;
     const t = document.activeElement;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-    copyToClipboard();
+    // Selection present → copy just the selected decals. Otherwise fall back
+    // to the existing whole-file copy.
+    if (selectedIdxs.size) copyDecalsToClipboard();
+    else copyToClipboard();
     e.preventDefault();
   });
 
@@ -937,6 +1137,19 @@
       fitPanel(panel);
       drawPanel(panel);
     });
+
+    // Track mouse position per panel so Ctrl+V can paste under the cursor on
+    // whichever face the user is hovering. Reset when the mouse leaves.
+    cv.addEventListener('mousemove', (e) => {
+      const rect = cv.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      mouseFace = panel.face;
+      mouseWorld = screenToWorld(panel, sx, sy);
+    });
+    cv.addEventListener('mouseleave', () => {
+      if (mouseFace === panel.face) { mouseFace = null; mouseWorld = null; }
+    });
   }
 
   window.addEventListener('mousemove', (e) => {
@@ -976,7 +1189,7 @@
       }
       const primary = layers[dragState.idx];
       panel.statusEl.textContent = `${primary.decalKey}: x ${primary.position.x.toFixed(2)}, y ${primary.position.y.toFixed(2)}`;
-      drawAll();
+      scheduleDraw();
       renderList();
       renderProps();
     }
@@ -1088,6 +1301,12 @@
     flipBtn.classList.toggle('active', isFlipped(l));
     mirrorBtn.classList.toggle('active', mir);
     lockBtn.classList.toggle('active', isLocked(selectedIdx));
+    // Alignment / distribute row: only meaningful with 2+ selected. Distribute
+    // needs 3+ to do anything, so it gets disabled with a dim look at exactly 2.
+    alignRow.classList.toggle('hidden', selectedIdxs.size < 2);
+    const distribOk = selectedIdxs.size >= 3;
+    distribH.disabled = !distribOk;
+    distribV.disabled = !distribOk;
     updateCountBadge();
   }
 
@@ -1097,6 +1316,15 @@
     renderProps();
     drawAll();
     updateCountBadge();
+    updatePickerLabel();
+  }
+
+  function updatePickerLabel() {
+    if (!pickerLabel) return;
+    const n = selectedIdxs.size;
+    pickerLabel.textContent = n > 0
+      ? `Decals · alt+click replaces ${n}`
+      : 'Decals';
   }
 
   // Apply `setter` to every selected (unlocked) layer.
@@ -1109,7 +1337,7 @@
       touched = true;
     }
     if (!touched) return;
-    drawAll();
+    scheduleDraw();
     renderList();
   }
   function bindPropInput(input, field, apply) {
@@ -1329,6 +1557,51 @@
     toast(`Deleted ${toDelete.length}`);
   }
 
+  // ---------- alignment / distribute ----------
+  // All operations treat position.x/y as the decal's center (matches how the
+  // rest of the editor handles positions). Locked decals don't move.
+  function unlockedSelectedIdxs() {
+    return [...selectedIdxs].filter(i => !isLocked(i));
+  }
+
+  function alignSelected(axis, mode) {
+    const idxs = unlockedSelectedIdxs();
+    if (idxs.length < 2) return;
+    pushHistory();
+    const vals = idxs.map(i => layers[i].position[axis]);
+    const target = mode === 'min' ? Math.min(...vals)
+                 : mode === 'max' ? Math.max(...vals)
+                 : (Math.min(...vals) + Math.max(...vals)) / 2;
+    for (const i of idxs) layers[i].position[axis] = target;
+    refreshAll();
+    toast(`Aligned ${idxs.length} decals`);
+  }
+
+  function distributeSelected(axis) {
+    const idxs = unlockedSelectedIdxs();
+    if (idxs.length < 3) return;
+    pushHistory();
+    idxs.sort((a, b) => layers[a].position[axis] - layers[b].position[axis]);
+    const first = layers[idxs[0]].position[axis];
+    const last  = layers[idxs[idxs.length - 1]].position[axis];
+    const step  = (last - first) / (idxs.length - 1);
+    for (let k = 1; k < idxs.length - 1; k++) {
+      layers[idxs[k]].position[axis] = first + step * k;
+    }
+    refreshAll();
+    toast(`Distributed ${idxs.length} decals`);
+  }
+
+  alignL.addEventListener('click',  () => alignSelected('x', 'min'));
+  alignCx.addEventListener('click', () => alignSelected('x', 'mid'));
+  alignR.addEventListener('click',  () => alignSelected('x', 'max'));
+  // Y up: top = max, bottom = min.
+  alignT.addEventListener('click',  () => alignSelected('y', 'max'));
+  alignCy.addEventListener('click', () => alignSelected('y', 'mid'));
+  alignB.addEventListener('click',  () => alignSelected('y', 'min'));
+  distribH.addEventListener('click', () => distributeSelected('x'));
+  distribV.addEventListener('click', () => distributeSelected('y'));
+
   mirrorBtn.addEventListener('click', () => {
     if (selectedIdxs.size === 0) return;
     for (const i of [...selectedIdxs]) mirrorAction(i);
@@ -1402,13 +1675,24 @@
         case 's': l.position.y -= step; touched = true; break;
         case 'a': l.position.x -= step; touched = true; break;
         case 'd': l.position.x += step; touched = true; break;
-        case 'q': l.rotation.roll = (l.rotation.roll || 0) - rotStep; touched = true; break;
-        case 'e': l.rotation.roll = (l.rotation.roll || 0) + rotStep; touched = true; break;
+        // Shift+Q/E snaps to the nearest multiple of 15° instead of just
+        // stepping by it. Lets the user lock in clean 0/15/30/45° angles
+        // regardless of where the decal currently sits.
+        case 'q': {
+          const curr = l.rotation.roll || 0;
+          l.rotation.roll = e.shiftKey ? Math.ceil(curr / 15 - 1) * 15 : curr - 1;
+          touched = true; break;
+        }
+        case 'e': {
+          const curr = l.rotation.roll || 0;
+          l.rotation.roll = e.shiftKey ? Math.floor(curr / 15 + 1) * 15 : curr + 1;
+          touched = true; break;
+        }
       }
     }
     if (touched) {
       e.preventDefault();
-      drawAll();
+      scheduleDraw();
       renderList();
       renderProps();
     }

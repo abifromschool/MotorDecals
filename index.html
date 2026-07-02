@@ -65,7 +65,7 @@
     </div>
     <div id="asset-picker">
       <div class="picker-header">
-        <div class="panel-label">Decals</div>
+        <div class="panel-label" id="picker-label">Decals</div>
         <input type="text" id="picker-search" placeholder="Search…" autocomplete="off">
       </div>
       <div id="picker-grid"></div>
@@ -106,6 +106,16 @@
         <button id="flip-btn" title="Toggle vertical flip — flags bits 0+4 (F)">Flip V</button>
         <button id="lock-btn" title="Lock prevents drag/WASD/delete (L)">Lock</button>
       </div>
+      <div class="align-row hidden" id="align-row">
+        <button class="align-btn" id="align-l"  title="Align left">⇤</button>
+        <button class="align-btn" id="align-cx" title="Align horizontal center">↔</button>
+        <button class="align-btn" id="align-r"  title="Align right">⇥</button>
+        <button class="align-btn" id="align-t"  title="Align top">⇡</button>
+        <button class="align-btn" id="align-cy" title="Align vertical center">↕</button>
+        <button class="align-btn" id="align-b"  title="Align bottom">⇣</button>
+        <button class="align-btn" id="distrib-h" title="Distribute horizontally (3+)">⇆</button>
+        <button class="align-btn" id="distrib-v" title="Distribute vertically (3+)">⇅</button>
+      </div>
       <div class="prop-actions">
         <button id="raise-btn" title="Move up one layer (])">Raise</button>
         <button id="lower-btn" title="Move down one layer ([)">Lower</button>
@@ -122,13 +132,14 @@
     </div>
     <div class="hint">
       <b>Drag</b> to move · <b>Ctrl+click</b> to multi-select · drag in empty space to marquee-select.<br>
-      <b>WASD</b> nudges · <b>Q/E</b> rotates · hold <b>Shift</b> for 10×.<br>
+      <b>WASD</b> nudges (Shift = 10×) · <b>Q/E</b> rotates 1° (<b>Shift+Q/E</b> snaps to 15°).<br>
       <b>M</b> mirror (auto-clones text) · <b>F</b> flip · <b>L</b> lock · <b>[ / ]</b> reorder.<br>
       <b>Ctrl+A</b> select all · <b>Esc</b> deselect · <b>Del</b> deletes · <b>Ctrl+D</b> duplicates.<br>
       <b>Ctrl+Z</b> undo · <b>Ctrl+Shift+Z</b> / <b>Ctrl+Y</b> redo.<br>
       <b>Add a decal:</b> click a thumbnail, then click any face. <b>Esc</b> cancels.<br>
+      <b>Replace key:</b> select decal(s) → <b>alt+click</b> a thumbnail.<br>
       Shift-drag or middle-click to pan, scroll to zoom, double-click to fit.<br>
-      <b>Ctrl/Cmd+V</b> pastes JSON · <b>Ctrl/Cmd+C</b> copies.
+      <b>Ctrl/Cmd+C/V</b> copy/paste decals when selected, otherwise the whole file. Paste lands on the panel under your cursor.
     </div>
   </aside>
 </main>

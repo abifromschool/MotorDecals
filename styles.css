@@ -163,6 +163,10 @@ body.placing .view-panel canvas { cursor: crosshair; }
   gap: 6px;
   padding: 8px;
   align-content: start;
+  /* Prevent modifier-clicks (esp. Shift) from creating browser text selection
+     across cells while the user is choosing assets. */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 #picker-grid .picker-cell {
@@ -184,6 +188,18 @@ body.placing .view-panel canvas { cursor: crosshair; }
 #picker-grid .picker-cell.armed {
   border-color: #7ab8ff;
   box-shadow: 0 0 0 1px #7ab8ff inset;
+  background: #2a3a52;
+}
+
+/* Recently used decals — subtle warm-tinted border so they're discoverable
+   at the top of the picker without overwhelming the rest of the grid. */
+#picker-grid .picker-cell.recent {
+  border-color: #6b5938;
+  background: #1f1c17;
+}
+#picker-grid .picker-cell.recent:hover { border-color: #b08947; }
+#picker-grid .picker-cell.recent.armed {
+  border-color: #7ab8ff;
   background: #2a3a52;
 }
 
@@ -424,6 +440,27 @@ body.placing .view-panel canvas { cursor: crosshair; }
   border-color: #4a7ab0;
   color: #fff;
 }
+
+.align-row {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 3px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #2a2a2a;
+}
+
+.align-row.hidden { display: none; }
+
+.align-btn {
+  padding: 5px 0;
+  font-size: 14px;
+  line-height: 1;
+  font-family: inherit;
+  min-width: 0;
+}
+
+.align-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
 .prop-color {
   display: grid;
